@@ -1,0 +1,14 @@
+# Scaffold overlay for models in common.models.REQUIRES_TOOLCALL (Inkling, DeepSeek V4 Flash,
+# Kimi K3): the agent reaches the shell through mini's native bash tool instead of a ```bash block
+# in its reply. run_sweep.py appends this file to the dataset's config stack for those models.
+#
+# base.yaml's `litellm_textbased` class drops the `tools=[BASH_TOOL]` argument and requires exactly
+# one ```bash block per reply. Models post-trained for tool calling answer in their native call
+# syntax or batch several commands per reply, which that scaffold rejects as format errors.
+#
+# Only the model class and the prompt's format rules change. The format rules are rewritten at run
+# time by run_sweep.apply_toolcall_prompt(), which asserts that every snippet it replaces is present
+# in base.yaml and drops the unused `action_regex`; the resulting prompt is saved in the run's
+# config.merged.yaml. Task instructions, submission protocol, limits and environment are unchanged.
+model:
+  model_class: litellm

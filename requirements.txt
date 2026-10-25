@@ -1,0 +1,24 @@
+# Python 3.10. Versions are the ones the paper's results were produced with.
+
+# Model access and agent scaffolds
+anthropic==0.120.0
+openai==2.38.0
+litellm==1.88.1
+mini-swe-agent==2.4.0        # SWE-Bench Pro agent
+docker==7.1.0                # SWE-Bench Pro evaluator
+datasets==5.0.0              # SWE-Bench Pro instances from Hugging Face
+huggingface-hub==1.17.0
+
+# Analysis and figures
+numpy==2.2.6
+pandas==2.3.3
+scipy==1.15.3
+matplotlib==3.10.9
+
+# Plumbing
+python-dotenv==1.2.2
+pyyaml==6.0.3
+rich==15.0.0
+
+# Terminal-Bench uses the harbor CLI, installed separately as a uv tool:
+#   uv tool install harbor==0.20.0

@@ -1,0 +1,42 @@
+# Control 2 of SWE-Bench Pro-Corrected: restrict network egress to package registries.
+#
+# Overlay on base.yaml + strip_history.yaml (`--dataset pro-corrected`). With the history stripped
+# but the network open, an agent can still fetch the fix from the code host (`git fetch` from the
+# upstream, the GitHub API). This swaps in the environment subclass that also seals egress, as in
+# https://cursor.com/blog/reward-hacking-coding-benchmarks; the sanitizer is inherited.
+#
+# Two mechanisms (common/sealed_docker.py):
+#   * the task container joins an `--internal` Docker network, which has no route off the host, so
+#     raw IPs, ssh, git:// and plain sockets fail and external DNS does not resolve;
+#   * a tinyproxy sidecar on that network and on `bridge` is the only exit, and it refuses every
+#     destination host outside common/egress_proxy/allowlist.txt (filtering on the request host,
+#     including `CONNECT host:443`, so no TLS is intercepted).
+#
+# A package that only a denied host can serve will not install. The images are already
+# provisioned (node_modules present, Go module cache warm, pip pointed at a mirror on
+# 127.0.0.1:9876, which NO_PROXY keeps reachable); Go's `GOPROXY=...,direct` fallback to the code
+# host is denied.
+#
+# verify_egress.py checks from inside a task container that the code host is refused, a registry
+# answers, and the no-proxy bypass routes fail.
+
+environment:
+  environment_class: common.sealed_docker.SealedDockerEnvironment
+
+  # The proxy is reached by container name over the user-defined network. NO_PROXY keeps the
+  # images' local pip mirror (127.0.0.1:9876) off the proxy.
+  env:
+    HTTP_PROXY: http://cp-egress-proxy:8888
+    HTTPS_PROXY: http://cp-egress-proxy:8888
+    http_proxy: http://cp-egress-proxy:8888
+    https_proxy: http://cp-egress-proxy:8888
+    NO_PROXY: localhost,127.0.0.1,::1
+    no_proxy: localhost,127.0.0.1,::1
+
+  proxy_network: cp_sealed_net
+  proxy_container: cp-egress-proxy
+  proxy_port: 8888
+  # As in base.yaml's run_args: hosts whose default runtime is nvidia cannot start plain alpine.
+  proxy_run_args:
+  - --runtime
+  - runc

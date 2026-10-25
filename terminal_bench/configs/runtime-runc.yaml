@@ -1,0 +1,12 @@
+# Run Terminal-Bench task containers with the plain `runc` runtime.
+#
+# On a host whose Docker `default-runtime` is `nvidia`, the nvidia runtime hook fails on
+# non-GPU containers ("OCI runtime create failed: ... nvidia-container-runtime did not
+# terminate successfully"). Terminal-Bench tasks need no GPU.
+#
+# harbor merges this file via `--extra-docker-compose`, which run_sweep.py passes by default;
+# use `--docker-runtime default` on a host whose default runtime is already runc. Only the
+# `main` service is overridden.
+services:
+  main:
+    runtime: runc

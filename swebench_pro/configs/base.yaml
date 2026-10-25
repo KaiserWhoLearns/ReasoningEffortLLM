@@ -1,0 +1,202 @@
+# mini-swe-agent config for SWE-Bench Pro, aligned with the official SWE-Bench Pro mini run
+# (scaleapi/mini-swe-agent `src/minisweagent/config/swebp.yaml`): text-based scaffold, exactly one
+# ```bash block per turn, THOUGHT before the command. The prompt is reproduced verbatim except:
+#   - {{working_dir}} -> /app and {{problem_statement}} -> {{task}} (mini 2.4 passes the problem
+#     statement as `task`);
+#   - submission: the official prompt ends with a bare `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`
+#     because Scale's harness captures `git diff` from the container itself, whereas mini 2.4 takes
+#     the output printed after that marker as the patch. The finish instruction is therefore a
+#     two-step `git diff HEAD > /tmp/patch.txt` then `echo ... && cat /tmp/patch.txt`.
+#
+# `action_regex` matches ```bash fences (mini's textbased default is ```mswea_bash_command).
+# Limits follow the official run: 250 model calls per instance and a 60 s timeout per command.
+# run_sweep.py adds the per-instance $ cap and wall-clock limit, the model and its effort setting,
+# and, for models in common.models.REQUIRES_TOOLCALL, configs/toolcall.yaml.
+
+agent:
+  system_template: |
+    You are a helpful assistant that can interact with a computer.
+
+    Your response must contain exactly ONE bash code block with ONE command (or commands connected with && or ||).
+    Include a THOUGHT section before your command where you explain your reasoning process.
+    Format your response as shown in <format_example>.
+
+    <format_example>
+    Your reasoning and analysis here. Explain why you want to perform the action.
+
+    ```bash
+    your_command_here
+    ```
+    </format_example>
+
+    Failure to follow these rules will cause your response to be rejected.
+
+    To finish, you must submit your changes as a git patch, in TWO SEPARATE commands (do NOT combine them):
+    1. Capture your patch as a diff of tracked files against the base commit. This deliberately EXCLUDES
+       untracked files (build artifacts, runtime data, reproduction scripts you created). If a NEW source
+       file is genuinely part of your fix, `git add` that file first so it is included:
+       ```bash
+       git diff HEAD > /tmp/patch.txt
+       ```
+    2. In your next response, submit EXACTLY this command and nothing else:
+       ```bash
+       echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && cat /tmp/patch.txt
+       ```
+    The submit command's first output line must be exactly COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT and it
+    must exit 0, or it will not submit. Do not issue any other command in the same response as the submit.
+  instance_template: |
+    <uploaded_files>
+    /app
+    </uploaded_files>
+    I've uploaded a python code repository in the directory /app. Consider the following PR description:
+
+    <pr_description>
+    {{task}}
+    </pr_description>
+
+    Can you help me implement the necessary changes to the repository so that the requirements specified in the <pr_description> are met?
+    I've already taken care of all changes to any of the test files described in the <pr_description>. This means you DON'T have to modify the testing logic or any of the tests in any way!
+    Your task is to make the minimal changes to non-tests files in the /app directory to ensure the <pr_description> is satisfied.
+    Follow these steps to resolve the issue:
+    1. As a first step, it might be a good idea to find and read code relevant to the <pr_description>
+    2. Create a script to reproduce the error and execute it with `python <filename.py>` using the bash tool, to confirm the error
+    3. Edit the sourcecode of the repo to resolve the issue
+    4. Rerun your reproduce script and confirm that the error is fixed!
+    5. Think about edgecases and make sure your fix handles them as well
+    Your thinking should be thorough and so it's fine if it's very long.
+
+    ## Important Rules
+
+    1. Every response must contain exactly one action
+    2. The action must be enclosed in triple backticks
+    3. Directory or environment variable changes are not persistent. Every action is executed in a new subshell.
+       However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files
+    4. To finish, submit your changes as a git patch (see the submission instructions in the system message).
+
+    ## Formatting your response
+
+    Here is an example of a correct response:
+
+    <example_response>
+    THOUGHT: I need to understand the structure of the repository first. Let me check what files are in the current directory to get a better understanding of the codebase.
+
+    ```bash
+    ls -la
+    ```
+    </example_response>
+
+    ## Useful command examples
+
+    ### Create a new file:
+
+    ```bash
+    cat <<'EOF' > newfile.py
+    import numpy as np
+    hello = "world"
+    print(hello)
+    EOF
+    ```
+
+    ### Edit files with sed:
+
+    ```bash
+    # Replace all occurrences
+    sed -i 's/old_string/new_string/g' filename.py
+
+    # Replace only first occurrence
+    sed -i 's/old_string/new_string/' filename.py
+
+    # Replace first occurrence on line 1
+    sed -i '1s/old_string/new_string/' filename.py
+
+    # Replace all occurrences in lines 1-10
+    sed -i '1,10s/old_string/new_string/g' filename.py
+    ```
+
+    ### View file content:
+
+    ```bash
+    # View specific lines with numbers
+    nl -ba filename.py | sed -n '10,20p'
+    ```
+
+    ### Any other command you want to run
+
+    ```bash
+    anything
+    ```
+  step_limit: 250      # official --per-instance-call-limit
+  cost_limit: 0        # official --per-instance-cost-limit; run_sweep.py --cost-limit overrides it
+environment:
+  cwd: /app
+  timeout: 60
+  # mini's default pull timeout (120 s) is too short for the largest Pro images.
+  pull_timeout: 1800
+  interpreter:
+  - bash
+  - -c
+  env:
+    PAGER: cat
+    MANPAGER: cat
+    LESS: -R
+    PIP_PROGRESS_BAR: 'off'
+    TQDM_DISABLE: '1'
+    BASH_ENV: /root/.bashrc
+  environment_class: docker
+  # `--runtime runc` lets the CPU-only images start on hosts whose default runtime is nvidia.
+  # Pro images set ENTRYPOINT=[/bin/bash]; mini keeps the container alive with `sleep <timeout>`
+  # as the command, which under that entrypoint becomes `bash sleep ...` and exits at once.
+  # Clearing the entrypoint makes `sleep` run directly.
+  run_args:
+  - --rm
+  - --runtime
+  - runc
+  - --entrypoint
+  - ''
+model:
+  model_class: litellm_textbased
+  action_regex: '```bash\s*\n(.*?)\n```'
+  observation_template: |
+    <returncode>{{output.returncode}}</returncode>
+    {% if output.output | length < 10000 -%}
+    <output>
+    {{ output.output -}}
+    </output>
+    {%- else -%}
+    <warning>
+    The output of your last command was too long.
+    Please try a different command that produces less output.
+    If you're looking at a file you can try use head, tail or sed to view a smaller number of lines selectively.
+    If you're using grep or find and it produced too much output, you can use a more selective search pattern.
+    If you really need to see something from the full command's output, you can redirect output to a file and then search in that file.
+    </warning>
+    {%- set elided_chars = output.output | length - 10000 -%}
+    <output_head>
+    {{ output.output[:5000] }}
+    </output_head>
+    <elided_chars>
+    {{ elided_chars }} characters elided
+    </elided_chars>
+    <output_tail>
+    {{ output.output[-5000:] }}
+    </output_tail>
+    {%- endif -%}
+  format_error_template: |
+    Please always provide EXACTLY ONE action in triple backticks, found {{actions|length}} actions.
+    If you want to end the task, please follow the submission instructions in the system message.
+    Else, please format your response exactly as follows:
+
+    <response_example>
+    Here are some thoughts about why you want to perform the action.
+
+    ```bash
+    <action>
+    ```
+    </response_example>
+
+    Note: In rare cases, if you need to reference a similar format in your command, you might have
+    to proceed in two steps, first writing TRIPLEBACKTICKSBASH, then replacing them with ```bash.
+  model_kwargs:
+    drop_params: true
+    # temperature is left unset: GPT-5.x reasoning models ignore it, and Claude with thinking
+    # enabled rejects any value other than 1.

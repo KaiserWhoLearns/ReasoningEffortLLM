@@ -1,0 +1,18 @@
+# Run results, derived products and fetched dependencies
+data/
+output/
+vendor/
+
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/

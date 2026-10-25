@@ -1,0 +1,47 @@
+# Egress allow-list for the SWE-Bench Pro-Corrected task environment (common/sealed_docker.py).
+#
+# One host per line. A leading dot means "this domain and its subdomains"; anything else is an
+# exact host match. Every host not listed is refused by the proxy, which is the only route out of
+# the task container's network.
+#
+# Only package registries needed to resolve dependencies belong here. A host that can serve the
+# contents of an arbitrary git repository does not, whatever its primary purpose: in particular
+# github.com and its content/API hosts, gitlab.com, bitbucket.org, search engines, and CDNs that
+# mirror GitHub repositories (e.g. cdn.jsdelivr.net/gh/...) or code-search sites.
+#
+# Comments and blank lines do not enter the policy sha (sealed_docker.policy()).
+
+# --- Python ---------------------------------------------------------------
+pypi.org
+.pythonhosted.org
+
+# --- JavaScript -----------------------------------------------------------
+registry.npmjs.org
+registry.yarnpkg.com
+
+# --- Go -------------------------------------------------------------------
+# GOPROXY in these images is `https://proxy.golang.org,direct`; the `direct` fallback resolves
+# modules from their code host, which is denied, so a module proxy.golang.org cannot serve fails.
+proxy.golang.org
+sum.golang.org
+
+# --- Rust -----------------------------------------------------------------
+crates.io
+static.crates.io
+index.crates.io
+
+# --- Ruby / PHP / Java / .NET --------------------------------------------
+rubygems.org
+repo.packagist.org
+packagist.org
+repo1.maven.org
+repo.maven.apache.org
+api.nuget.org
+
+# --- OS packages ----------------------------------------------------------
+deb.debian.org
+security.debian.org
+archive.ubuntu.com
+security.ubuntu.com
+ports.ubuntu.com
+dl-cdn.alpinelinux.org

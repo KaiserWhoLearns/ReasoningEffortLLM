@@ -1,0 +1,160 @@
+# Control 1 of SWE-Bench Pro-Corrected: strip the container's git history.
+#
+# Overlay on base.yaml (`--dataset pro-corrected`, together with seal_network.yaml). It changes only
+# the state of /app/.git at step 0: the official images ship the full clone, including the
+# instance's own fix commit after the base commit, and this replaces it with a single-commit
+# repository at the base commit, following
+# https://cursor.com/blog/reward-hacking-coding-benchmarks. Scoring is unaffected: evaluate.py
+# starts a fresh container from the original image, where the history the evaluator needs is
+# present.
+#
+# The script asserts that the task is unchanged and fails the instance otherwise (a non-zero exit
+# becomes a RuntimeError in common/sanitized_docker.py, so the agent never starts):
+#   * HEAD^{tree} is byte-identical to the original and the tracked-file count is unchanged;
+#   * `git status --porcelain` and the body of `git diff HEAD` are unchanged (some images ship
+#     pre-existing changes, which are restored after the base commit is made);
+#   * the commit carries the base commit's author and date, `.git/info/exclude` is kept, and
+#     `core.abbrev` is pinned to the original abbreviation length;
+#   * submodule gitdirs are carried across the re-init and uninitialised gitlinks are replayed;
+#   * exactly one commit and one ref remain, no remote or tag, and no unreachable object.
+# It prints `STRIP-OK ...` on success (recorded in the trajectory) or `STRIP-FAIL: <reason>`.
+#
+# verify_sanitization.py runs this same script in each instance's container and checks the
+# invariants from outside, including that the instance's fix commit is gone.
+
+environment:
+  environment_class: common.sanitized_docker.GitStrippedDockerEnvironment
+  setup_timeout: 900     # re-adding every file of a large repo takes longer than a step
+  setup_command: |
+    set -u
+    fail() { echo "STRIP-FAIL: $*"; exit 1; }
+    cd /app || fail "no /app in this image"
+
+    git rev-parse --is-inside-work-tree >/dev/null 2>&1 || fail "/app is not a git work tree"
+    top=$(git rev-parse --show-toplevel)
+    [ "$top" = "/app" ] || fail "git work-tree root is $top, not /app"
+
+    # Nested repositories keep their own history. A nested clone of the SAME upstream could hold
+    # this instance's fix, so it is refused; others (e.g. an initialised submodule of a different
+    # project) are left in place and reported. verify_sanitization.py independently checks that
+    # the gold sha is not an object in any of them.
+    norm_url() { printf '%s' "${1%.git}" | sed -e 's#^git@\(.*\):#https://\1/#' -e 's#/*$##'; }
+    main_url=$(norm_url "$(git config --get remote.origin.url || echo "")")
+    nested_note=""
+    find /app -mindepth 2 -name .git -prune > /tmp/.strip_nested 2>/dev/null || true
+    while IFS= read -r nested_git; do
+      [ -n "$nested_git" ] || continue
+      nested_dir=$(dirname "$nested_git")
+      nested_url=$(norm_url "$(git -C "$nested_dir" config --get remote.origin.url 2>/dev/null || echo "")")
+      if [ -n "$main_url" ] && [ "$nested_url" = "$main_url" ]; then
+        fail "nested clone of the SAME repository at $nested_dir would keep this instance's history"
+      fi
+      nested_note="$nested_note $nested_dir(${nested_url:-no-remote})"
+    done < /tmp/.strip_nested
+
+    before_head=$(git rev-parse HEAD)
+    before_tree=$(git rev-parse "HEAD^{tree}")
+    before_files=$(git ls-files | wc -l)
+    before_commits=$(git rev-list --count HEAD)
+    before_refs=$(git for-each-ref | wc -l)
+    sum() { if command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -d" " -f1; else cksum; fi; }
+    # The two states the agent observes, hashed for comparison after the strip: `git status
+    # --porcelain` (includes untracked files) and `git diff HEAD` (what the submission captures).
+    before_status=$(git status --porcelain | sum)
+    before_diff=$(git diff HEAD | sum)
+    # Diff `index <old>..<new>` headers use abbreviated blob ids whose length git derives from the
+    # object count; the original length is carried over so the patch text keeps the same shape.
+    before_abbrev=$(git rev-parse --short HEAD | tr -d "\n" | wc -c)
+    before_diff_body=$(git diff HEAD | grep -v "^index " | sum)
+    n_untracked=$(git ls-files --others --exclude-standard | wc -l)
+    n_modified=$(git diff HEAD --name-only | wc -l)
+    # A staged pre-existing change would need `git apply --index` to reproduce; refuse it.
+    [ -z "$(git diff --cached HEAD --name-only)" ] || fail "pre-existing STAGED changes ($(git diff --cached HEAD --name-only | tr "\n" " ")); re-applying them needs git apply --index"
+
+    # Replay the exact tracked path set with `add -f`: `git add -A` would skip tracked paths that
+    # .gitignore matches and so change the tree.
+    git ls-files -z > /tmp/.strip_paths || fail "could not list tracked files"
+    # Submodule gitlinks (mode 160000) of uninitialised submodules cannot be re-added by `git add`
+    # (no gitdir to read), so they are replayed straight into the index below.
+    git ls-files -s | awk '$1 == "160000"' > /tmp/.strip_gitlinks || true
+    n_gitlinks=$(wc -l < /tmp/.strip_gitlinks)
+    git diff HEAD --binary > /tmp/.strip_wt.patch || fail "could not capture pre-existing edits"
+    if [ -s /tmp/.strip_wt.patch ]; then
+      # Commit HEAD's content, not the dirty working tree; the edits are re-applied afterwards.
+      git checkout -f HEAD -- . || fail "could not restore tracked files to HEAD"
+    fi
+
+    # Reuse the base commit's author and date so the replacement commit is deterministic.
+    an=$(git log -1 --format=%an); ae=$(git log -1 --format=%ae); ad=$(git log -1 --format=%ad)
+    keep_exclude=""
+    if [ -f .git/info/exclude ]; then keep_exclude=/tmp/.strip_exclude; cp .git/info/exclude "$keep_exclude"; fi
+
+    # An initialised submodule's gitdir (.git/modules/<name>) holds a different repository's
+    # history; carry it across the re-init so `git status` reports the submodule unchanged.
+    if [ -d .git/modules ]; then mv .git/modules /tmp/.strip_modules || fail "could not set aside .git/modules"; fi
+    rm -rf .git || fail "could not remove .git"
+    git init -q || fail "git init failed"
+    if [ -d /tmp/.strip_modules ]; then mv /tmp/.strip_modules .git/modules || fail "could not restore .git/modules"; fi
+    git symbolic-ref HEAD refs/heads/main    # the original HEAD was detached
+    git config core.abbrev "$before_abbrev"
+    if [ -n "$keep_exclude" ]; then mkdir -p .git/info && cp "$keep_exclude" .git/info/exclude && rm -f "$keep_exclude"; fi
+    # stderr is dropped because `* text=auto` repos emit one CRLF warning per file; the return
+    # code is still checked and the tree-sha invariant below proves the add was faithful.
+    xargs -0 -r git add -f -- < /tmp/.strip_paths 2>/dev/null || fail "git add failed"
+    if [ -s /tmp/.strip_gitlinks ]; then
+      while IFS= read -r entry; do
+        link_sha=$(printf '%s' "$entry" | awk '{print $2}')
+        link_path=$(printf '%s' "$entry" | cut -f2-)
+        # An initialised submodule is already recorded correctly; fix only the uninitialised ones,
+        # which `git add` either skips or stages as directory content.
+        staged_sha=$(git ls-files -s -- "$link_path" | awk '$1 == "160000" {print $2}')
+        if [ "$staged_sha" != "$link_sha" ]; then
+          git rm -r --cached -q --ignore-unmatch -- "$link_path" 2>/dev/null \
+            || fail "could not unstage submodule contents at $link_path"
+          git update-index --add --cacheinfo "160000,$link_sha,$link_path" \
+            || fail "could not restore submodule gitlink $link_path"
+        fi
+      done < /tmp/.strip_gitlinks
+    fi
+    GIT_AUTHOR_NAME="$an" GIT_AUTHOR_EMAIL="$ae" GIT_AUTHOR_DATE="$ad" \
+    GIT_COMMITTER_NAME="$an" GIT_COMMITTER_EMAIL="$ae" GIT_COMMITTER_DATE="$ad" \
+      git commit -q -m "Initial commit" || fail "git commit failed"
+
+    # Unstaging submodule contents above left unreferenced blobs; prune them so the
+    # no-unreachable-objects invariant below is exact.
+    git prune --expire=now >/dev/null 2>&1 || true
+
+    # --- invariant 1: the agent is given exactly the same files ---
+    after_tree=$(git rev-parse "HEAD^{tree}")
+    [ "$after_tree" = "$before_tree" ] || fail "tree changed ($before_tree -> $after_tree): the agent would not see the files the original dataset shows it"
+    [ "$(git ls-files | wc -l)" -eq "$before_files" ] || fail "tracked file count changed"
+
+    # --- invariant 2: nothing of the history survives ---
+    [ "$(git rev-list --count HEAD)" -eq 1 ] || fail "expected exactly one commit"
+    [ "$(git for-each-ref | wc -l)" -eq 1 ] || fail "extra refs survived the strip"
+    [ "$(git remote | wc -l)" -eq 0 ] || fail "a remote survived the strip"
+    [ "$(git tag | wc -l)" -eq 0 ] || fail "a tag survived the strip"
+    # No object may exist that the single commit does not reach, so the fix commit cannot be
+    # recovered by `git cat-file`, `git fsck --lost-found` or a stale pack.
+    objs=$(git cat-file --batch-all-objects --batch-check 2>/dev/null | wc -l)
+    reach=$(git rev-list --objects --all | wc -l)
+    [ "$objs" -eq "$reach" ] || fail "$((objs - reach)) unreachable object(s) left in .git"
+
+    # --- invariant 3: the starting state the agent observes is unchanged ---
+    # Pre-existing working-tree changes are part of the task (`git diff HEAD` is what
+    # the submission captures), so they are restored rather than committed.
+    if [ -s /tmp/.strip_wt.patch ]; then
+      git apply --binary --whitespace=nowarn /tmp/.strip_wt.patch || fail "could not re-apply the pre-existing working-tree edits"
+    fi
+    [ "$(git status --porcelain | sum)" = "$before_status" ] || fail "git status differs from the original container"
+    # The diff body must match exactly; only the index-header abbreviation may differ.
+    [ "$(git diff HEAD | grep -v "^index " | sum)" = "$before_diff_body" ] || fail "git diff HEAD content differs from the original container"
+    if [ "$(git diff HEAD | sum)" != "$before_diff" ]; then
+      echo "STRIP-NOTE: diff index-header abbreviation differs from the original (content identical)"
+    fi
+    rm -rf /tmp/.strip_paths /tmp/.strip_wt.patch /tmp/.strip_gitlinks /tmp/.strip_nested /tmp/.strip_modules
+
+    echo "STRIP-OK base_commit=$before_head tree=$before_tree tracked=$before_files" \
+         "removed_commits=$before_commits removed_refs=$before_refs objects=$objs" \
+         "preexisting_untracked=$n_untracked preexisting_modified=$n_modified" \
+         "submodule_gitlinks=$n_gitlinks nested_repos_left_alone=${nested_note:-none}"
