@@ -174,6 +174,11 @@ The two reference-fix panels use the Inter typeface if `figures/fonts/Inter-*.tt
 ([rsms/inter](https://github.com/rsms/inter), SIL Open Font License); otherwise they fall back
 to the default figure font.
 
+## License
+
+MIT; see [LICENSE](LICENSE). The vendored Act-onomy skill in `behavior/actonomy/skill/` keeps
+its own licences (MIT code, CC BY 4.0 codebook); see its `UPSTREAM.md`.
+
 ## Cost accounting
 
 Runs store token counts; dollars are always computed from the tokens and the rate table in
