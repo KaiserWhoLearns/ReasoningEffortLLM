@@ -1,4 +1,4 @@
-# What Effort Level Should I Choose? — reproduction code
+# What Effort Level Should I Choose?
 
 Code for running the experiments and rebuilding the figures and tables of
 *What Effort Level Should I Choose? On the Economics of Reasoning Effort in LLM Agents*.
