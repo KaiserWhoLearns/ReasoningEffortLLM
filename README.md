@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-# What Effort Level Should I Choose?
-=======
 <div align="center">
->>>>>>> f751565 (Updated readme)
 
 # What Effort Level Should I Choose?
 
