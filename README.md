@@ -1,7 +1,60 @@
+<<<<<<< HEAD
+# What Effort Level Should I Choose?
+=======
+<div align="center">
+>>>>>>> f751565 (Updated readme)
+
 # What Effort Level Should I Choose?
 
-Code for running the experiments and rebuilding the figures and tables of
-*What Effort Level Should I Choose? On the Economics of Reasoning Effort in LLM Agents*.
+### On the Economics of Reasoning Effort in LLM Agents
+
+[![arXiv](https://img.shields.io/badge/arXiv-paper-b31b1b?logo=arxiv&logoColor=white)](https://arxiv.org/abs/2610.34491)
+[![Python 3.10](https://img.shields.io/badge/python-3.10-3776ab?logo=python&logoColor=white)](requirements.txt)
+[![License: MIT](https://img.shields.io/badge/license-MIT-2ea44f)](LICENSE)
+[![Cite](https://img.shields.io/badge/cite-BibTeX-555555)](#citation)
+
+**Kaiser Sun**<sup>1\*†</sup>, **Yongchan Kwon**<sup>2</sup>, **Zain Hasan**<sup>2</sup>,
+**Shang Zhu**<sup>2</sup>, **Kaitlyn Zhou**<sup>3,2</sup>, **Federico Bianchi**<sup>2†</sup>
+
+<sup>1</sup>Johns Hopkins University · <sup>2</sup>Together AI · <sup>3</sup>Cornell University
+
+<sub>\*Work done during an internship at Together AI. †Corresponding authors.</sub>
+
+<img src="assets/instances_gained.png" alt="Instances gained and lost between adjacent effort levels on Terminal-Bench and SWE-Bench Pro" width="100%">
+
+<sub>Tasks gained (solid) and lost (hollow) when a model moves up one reasoning-effort level.</sub>
+
+</div>
+
+Many LLMs expose a **reasoning effort** setting that buys more inference-time compute. Users
+must pick a level before knowing whether the extra reasoning will help, and a successful run
+does not show whether the effort was needed: reasoning effort is a **credence good**. We
+measure the counterfactual effect of every effort level for eight proprietary and open-weight
+models on four benchmarks, from single-call reasoning to long-horizon agentic tasks.
+
+- **Higher effort is not a superset of lower effort.** It can raise aggregate accuracy, yet it
+  frequently fails tasks that a lower level solved (figure above).
+- **Higher effort overspends on easy tasks.** On tasks every level solves, the highest level
+  costs up to **42×** as much as the lowest.
+- **Effort changes how agents work.** At higher effort, agents verify their own work more and
+  more often search for solutions instead of working through the problem, which lengthens
+  trajectories without necessarily changing the outcome.
+- **Escalate on failure instead.** Starting at the lowest level and escalating only after a
+  verified failure matches or improves on fixed top effort across all models and benchmarks,
+  at lower cost for most proprietary models.
+
+<details>
+<summary>Cost on always-solved tasks and behavior shifts</summary>
+
+<img src="assets/solvable_cost.png" alt="Cost of tasks solved at every effort level, relative to low effort" width="100%">
+
+<img src="assets/behavior_overview.png" alt="Change in Act-onomy behavior shares from lowest to highest effort" width="100%">
+
+</details>
+
+## About this repository
+
+Code for running the experiments and rebuilding the figures and tables of the paper.
 
 The study holds the task set, the prompt and the agent harness fixed, varies a model's
 reasoning-effort setting, and records task outcomes, token usage and cost at every level. It
@@ -173,6 +226,21 @@ first.
 The two reference-fix panels use the Inter typeface if `figures/fonts/Inter-*.ttf` is present
 ([rsms/inter](https://github.com/rsms/inter), SIL Open Font License); otherwise they fall back
 to the default figure font.
+
+## Citation
+
+If you use this code or our findings, please cite the paper. The entry is also in
+[`CITATION.bib`](CITATION.bib).
+
+```bibtex
+@article{sun2026effort,
+  title   = {What Effort Level Should I Choose? On the Economics of Reasoning Effort in LLM Agents},
+  author  = {Sun, Kaiser and Kwon, Yongchan and Hasan, Zain and Zhu, Shang and Zhou, Kaitlyn and Bianchi, Federico},
+  journal = {arXiv preprint arXiv:2610.34491},
+  year    = {2026},
+  url     = {https://arxiv.org/abs/2610.34491}
+}
+```
 
 ## License
 
